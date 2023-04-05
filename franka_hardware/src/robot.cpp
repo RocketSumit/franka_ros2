@@ -34,6 +34,11 @@ Robot::Robot(const std::string& robot_ip, const rclcpp::Logger& logger) {
   robot_ = std::make_unique<franka::Robot>(robot_ip, rt_config);
   model_ = std::make_unique<franka::Model>(robot_->loadModel());
   franka_hardware_model_ = std::make_unique<Model>(model_.get());
+  // set collision behavior
+  robot_->setCollisionBehavior({{100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0}},
+                             {{100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0}},
+                             {{100.0, 100.0, 100.0, 100.0, 100.0, 100.0}},
+                             {{100.0, 100.0, 100.0, 100.0, 100.0, 100.0}});
 }
 
 void Robot::write(const std::array<double, 7>& efforts) {
