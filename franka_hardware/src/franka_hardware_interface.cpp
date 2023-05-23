@@ -54,6 +54,13 @@ std::vector<StateInterface> FrankaHardwareInterface::export_state_interfaces() {
       k_robot_name, k_robot_model_interface_name,
       reinterpret_cast<double*>(  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
           &hw_franka_model_ptr_)));
+  for (auto& sensor : info_.sensors) {
+    for (uint j = 0; j < sensor.state_interfaces.size(); ++j) {
+      state_interfaces.emplace_back(hardware_interface::StateInterface(
+          sensor.name, sensor.state_interfaces[j].name, &hw_ft_sensor_measurements_[j]));
+    }
+  }
+
   return state_interfaces;
 }
 
@@ -94,6 +101,7 @@ hardware_interface::return_type FrankaHardwareInterface::read(const rclcpp::Time
   hw_positions_ = hw_franka_robot_state_.q;
   hw_velocities_ = hw_franka_robot_state_.dq;
   hw_efforts_ = hw_franka_robot_state_.tau_J;
+  hw_ft_sensor_measurements_ = kState.K_F_ext_hat_K;
   return hardware_interface::return_type::OK;
 }
 

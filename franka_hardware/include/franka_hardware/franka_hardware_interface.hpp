@@ -65,6 +65,7 @@ class FrankaHardwareInterface : public hardware_interface::SystemInterface {
   franka::RobotState* hw_franka_robot_state_addr_ = &hw_franka_robot_state_;
   Model* hw_franka_model_ptr_ = nullptr;
 
+  std::array<double, 6> hw_ft_sensor_measurements_{0, 0, 0, 0, 0, 0};
   bool effort_interface_claimed_ = false;
   bool effort_interface_running_ = false;
   static rclcpp::Logger getLogger();
