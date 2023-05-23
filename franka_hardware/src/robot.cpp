@@ -24,6 +24,7 @@ namespace franka_hardware {
 
 Robot::Robot(const std::string& robot_ip, const rclcpp::Logger& logger) {
   tau_command_.fill(0.);
+  position_command_.fill(0.);
   franka::RealtimeConfig rt_config = franka::RealtimeConfig::kEnforce;
   if (not franka::hasRealtimeKernel()) {
     rt_config = franka::RealtimeConfig::kIgnore;
@@ -49,9 +50,14 @@ Robot::Robot(const std::string& robot_ip, const rclcpp::Logger& logger) {
   /*                            {{100.0, 100.0, 100.0, 100.0, 100.0, 100.0}}); */
 }
 
-void Robot::write(const std::array<double, 7>& efforts) {
+void Robot::write_efforts(const std::array<double, 7>& efforts) {
   std::lock_guard<std::mutex> lock(write_mutex_);
   tau_command_ = efforts;
+}
+
+void Robot::write_positions(const std::array<double, 7>& positions) {
+  std::lock_guard<std::mutex> lock(write_mutex_);
+  position_command_ = positions;
 }
 
 franka::RobotState Robot::read() {
@@ -86,6 +92,26 @@ void Robot::initializeTorqueControl() {
         true, franka::kMaxCutoffFrequency);
   };
   control_thread_ = std::make_unique<std::thread>(kTorqueControl);
+}
+
+void Robot::initializePositionControl() {
+  assert(isStopped());
+  stopped_ = false;
+  const auto kPositionControl = [this]() {
+    robot_->control(
+        [this](const franka::RobotState& state, const franka::Duration& /*period*/) {
+          {
+            std::lock_guard<std::mutex> lock(read_mutex_);
+            current_state_ = state;
+          }
+          std::lock_guard<std::mutex> lock(write_mutex_);
+          franka::JointPositions out(position_command_);
+          out.motion_finished = finish_;
+          return out;
+        },
+        franka::ControllerMode::kJointImpedance, true, franka::kMaxCutoffFrequency);
+  };
+  control_thread_ = std::make_unique<std::thread>(kPositionControl);
 }
 
 void Robot::initializeContinuousReading() {

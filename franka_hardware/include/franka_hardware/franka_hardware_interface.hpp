@@ -53,13 +53,16 @@ class FrankaHardwareInterface : public hardware_interface::SystemInterface {
 
  private:
   std::unique_ptr<Robot> robot_;
-  std::array<double, kNumberOfJoints> hw_commands_{0, 0, 0, 0, 0, 0, 0};
+  std::array<double, kNumberOfJoints> effort_commands_{0, 0, 0, 0, 0, 0, 0};
+  std::array<double, kNumberOfJoints> position_commands_{0, 0, 0, 0, 0, 0, 0};
   std::array<double, kNumberOfJoints> hw_positions_{0, 0, 0, 0, 0, 0, 0};
   std::array<double, kNumberOfJoints> hw_velocities_{0, 0, 0, 0, 0, 0, 0};
   std::array<double, kNumberOfJoints> hw_efforts_{0, 0, 0, 0, 0, 0, 0};
   std::array<double, 6> hw_ft_sensor_measurements_{0, 0, 0, 0, 0, 0};
+  franka_hardware::ControlMode control_mode_ = franka_hardware::ControlMode::None;
   bool effort_interface_claimed_ = false;
-  bool effort_interface_running_ = false;
+  bool position_interface_claimed_ = false;
+  bool initialized_ = false;
   static rclcpp::Logger getLogger();
 };
 }  // namespace franka_hardware
