@@ -29,6 +29,16 @@
 
 namespace franka_hardware {
 
+enum class ControlMode {
+  None = 0,
+  JointTorque = (1 << 0),
+  JointPosition = (1 << 1),
+  // TODO: Add support for the following control modes.
+  /* JointVelocity = (1 << 2), */
+  /* CartesianVelocity = (1 << 3), */
+  /* CartesianPose = (1 << 4), */
+};
+
 class Robot {
  public:
   /**
@@ -52,6 +62,12 @@ class Robot {
    * control or reading loop is currently active.
    */
   virtual void initializeTorqueControl();
+
+  /**
+   * Starts a position control loop. Before using this method make sure that no other
+   * control or reading loop is currently active.
+   */
+  void initializePositionControl();
 
   /**
    * Starts a reading loop of the robot state. Before using this method make sure that no other
@@ -79,7 +95,14 @@ class Robot {
    * The robot will use these torques until a different set of torques are commanded.
    * @param[in] efforts torque command for each joint.
    */
-  virtual void write(const std::array<double, 7>& efforts);
+  virtual void write_efforts(const std::array<double, 7>& efforts);
+
+  /**
+   * Sends new desired position commands to the control loop in a thread-safe way.
+   * The robot will use these positions until a different set of positions are commanded.
+   * @param[in] positions position command for each joint.
+   */
+  virtual void write_positions(const std::array<double, 7>& positions);
 
   /// @return true if there is no control or reading loop running.
   [[nodiscard]] virtual bool isStopped() const;
@@ -100,5 +123,6 @@ class Robot {
   franka::RobotState current_state_;
 
   std::array<double, 7> tau_command_{};
+  std::array<double, 7> position_command_{};
 };
 }  // namespace franka_hardware
