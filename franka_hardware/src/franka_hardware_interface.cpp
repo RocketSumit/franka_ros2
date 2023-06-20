@@ -45,6 +45,7 @@ std::vector<StateInterface> FrankaHardwareInterface::export_state_interfaces() {
     state_interfaces.emplace_back(
         StateInterface(info_.joints[i].name, hardware_interface::HW_IF_EFFORT, &hw_efforts_.at(i)));
   }
+  // TODO: Maybe just use the sensor interface by ros2_control?
   for (auto& sensor : info_.sensors) {
     for (uint j = 0; j < sensor.state_interfaces.size(); ++j) {
       state_interfaces.emplace_back(hardware_interface::StateInterface(

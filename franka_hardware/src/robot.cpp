@@ -17,6 +17,9 @@
 #include <cassert>
 #include <mutex>
 
+#include <fmt/core.h>
+#include <fmt/ostream.h>
+#include <fmt/ranges.h>
 #include <franka/control_tools.h>
 #include <rclcpp/logging.hpp>
 
@@ -109,7 +112,8 @@ void Robot::initializePositionControl() {
           out.motion_finished = finish_;
           return out;
         },
-        franka::ControllerMode::kJointImpedance, true, franka::kMaxCutoffFrequency);
+        franka::ControllerMode::kJointImpedance, true,
+        1);  // Bigger values causes the robot to be unstable
   };
   control_thread_ = std::make_unique<std::thread>(kPositionControl);
 }
