@@ -185,33 +185,34 @@ hardware_interface::return_type FrankaHardwareInterface::perform_command_mode_sw
 hardware_interface::return_type FrankaHardwareInterface::prepare_command_mode_switch(
     const std::vector<std::string>& start_interfaces,
     const std::vector<std::string>& stop_interfaces) {
-  auto is_effort_interface = [](const std::string& interface) {
-    return interface.find(hardware_interface::HW_IF_EFFORT) != std::string::npos;
-  };
+  std::size_t num_stop_interfaces = 0;
+  for (const auto& key : stop_interfaces) {
+    for (auto i = 0u; i < info_.joints.size(); i++) {
+      if (key == info_.joints[i].name + "/" + hardware_interface::HW_IF_EFFORT) {
+        ++num_stop_interfaces;
+      }
+    }
+  }
 
-  int64_t num_stop_effort_interfaces =
-      std::count_if(stop_interfaces.begin(), stop_interfaces.end(), is_effort_interface);
-  if (num_stop_effort_interfaces == kNumberOfJoints) {
+  if (num_stop_interfaces == kNumberOfJoints) {
     effort_interface_claimed_ = false;
-  } else if (num_stop_effort_interfaces != 0) {
-    RCLCPP_FATAL(this->getLogger(), "Expected %ld effort interfaces to stop, but got %ld instead.",
-                 kNumberOfJoints, num_stop_effort_interfaces);
-    std::string error_string = "Invalid number of effort interfaces to stop. Expected ";
-    error_string += std::to_string(kNumberOfJoints);
-    throw std::invalid_argument(error_string);
+  } else if (num_stop_interfaces != 0) {
+    return hardware_interface::return_type::ERROR;
+  }
+  std::size_t num_start_interfaces = 0;
+  for (const auto& key : start_interfaces) {
+    for (auto i = 0u; i < info_.joints.size(); i++) {
+      if (key == info_.joints[i].name + "/" + hardware_interface::HW_IF_EFFORT) {
+        ++num_start_interfaces;
+      }
+    }
+  }
+  if (num_start_interfaces == kNumberOfJoints) {
+    effort_interface_claimed_ = true;
+  } else if (num_start_interfaces != 0) {
+    return hardware_interface::return_type::ERROR;
   }
 
-  int64_t num_start_effort_interfaces =
-      std::count_if(start_interfaces.begin(), start_interfaces.end(), is_effort_interface);
-  if (num_start_effort_interfaces == kNumberOfJoints) {
-    effort_interface_claimed_ = true;
-  } else if (num_start_effort_interfaces != 0) {
-    RCLCPP_FATAL(this->getLogger(), "Expected %ld effort interfaces to start, but got %ld instead.",
-                 kNumberOfJoints, num_start_effort_interfaces);
-    std::string error_string = "Invalid number of effort interfaces to start. Expected ";
-    error_string += std::to_string(kNumberOfJoints);
-    throw std::invalid_argument(error_string);
-  }
   return hardware_interface::return_type::OK;
 }
 }  // namespace franka_hardware
