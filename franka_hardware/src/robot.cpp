@@ -34,11 +34,11 @@ Robot::Robot(const std::string& robot_ip, const rclcpp::Logger& logger) {
   robot_ = std::make_unique<franka::Robot>(robot_ip, rt_config);
   // Set the collision behavior.
   std::array<double, 7> lower_torque_thresholds_acceleration{
-      {20.0, 20.0, 18.0, 18.0, 16.0, 14.0, 12.0}};
+      {40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0}};
   std::array<double, 7> upper_torque_thresholds_acceleration{
-      {20.0, 20.0, 18.0, 18.0, 16.0, 14.0, 12.0}};
-  std::array<double, 6> lower_force_thresholds_acceleration{{20.0, 20.0, 20.0, 25.0, 25.0, 25.0}};
-  std::array<double, 6> upper_force_thresholds_acceleration{{20.0, 20.0, 20.0, 25.0, 25.0, 25.0}};
+      {40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0}};
+  std::array<double, 6> lower_force_thresholds_acceleration{{40.0, 40.0, 40.0, 40.0, 40.0, 40.0}};
+  std::array<double, 6> upper_force_thresholds_acceleration{{40.0, 40.0, 40.0, 40.0, 40.0, 40.0}};
   robot_->setCollisionBehavior(
       lower_torque_thresholds_acceleration, upper_torque_thresholds_acceleration,
       lower_force_thresholds_acceleration, upper_force_thresholds_acceleration);
