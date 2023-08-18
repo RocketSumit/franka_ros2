@@ -67,6 +67,10 @@ std::vector<StateInterface> FrankaHardwareInterface::export_state_interfaces() {
     }
   }
 
+  // state interface which reports if robot is faulted
+  state_interfaces.emplace_back(
+      hardware_interface::StateInterface("reset_fault", "internal_fault", &in_fault_));
+
   return state_interfaces;
 }
 
@@ -85,6 +89,13 @@ std::vector<CommandInterface> FrankaHardwareInterface::export_command_interfaces
       }
     }
   }
+
+  command_interfaces.emplace_back(
+      hardware_interface::CommandInterface("reset_fault", "command", &reset_fault_cmd_));
+
+  command_interfaces.emplace_back(hardware_interface::CommandInterface(
+      "reset_fault", "async_success", &reset_fault_async_success_));
+
   return command_interfaces;
 }
 
@@ -109,17 +120,23 @@ CallbackReturn FrankaHardwareInterface::on_deactivate(
 
 hardware_interface::return_type FrankaHardwareInterface::read(const rclcpp::Time& /*time*/,
                                                               const rclcpp::Duration& /*period*/) {
-  if (hw_franka_model_ptr_ == nullptr) {
-    hw_franka_model_ptr_ = robot_->getModel();
+  if (robot_->connected()) {
+    if (hw_franka_model_ptr_ == nullptr) {
+      hw_franka_model_ptr_ = robot_->getModel();
+    }
+    hw_franka_robot_state_ = robot_->read();
+    hw_positions_ = hw_franka_robot_state_.q;
+    hw_velocities_ = hw_franka_robot_state_.dq;
+    hw_efforts_ = hw_franka_robot_state_.tau_J;
+    hw_ft_sensor_measurements_ = hw_franka_robot_state_.K_F_ext_hat_K;
+    if (control_mode_ == franka_hardware::ControlMode::None) {
+      position_commands_ = hw_positions_;
+    }
+    if (robot_->hasError()) {
+      in_fault_ = 1.0;
+    }
   }
-  hw_franka_robot_state_ = robot_->read();
-  hw_positions_ = hw_franka_robot_state_.q;
-  hw_velocities_ = hw_franka_robot_state_.dq;
-  hw_efforts_ = hw_franka_robot_state_.tau_J;
-  hw_ft_sensor_measurements_ = hw_franka_robot_state_.K_F_ext_hat_K;
-  if (control_mode_ == franka_hardware::ControlMode::None) {
-    position_commands_ = hw_positions_;
-  }
+
   return hardware_interface::return_type::OK;
 }
 
@@ -132,6 +149,20 @@ hardware_interface::return_type FrankaHardwareInterface::write(const rclcpp::Tim
   if (std::any_of(effort_commands_.begin(), effort_commands_.end(),
                   [](double c) { return not std::isfinite(c); })) {
     return hardware_interface::return_type::ERROR;
+  }
+
+  if (!std::isnan(reset_fault_cmd_) && fault_controller_running_) {
+    try {
+      if (robot_->hasError()) {
+        robot_->resetError();
+        RCLCPP_INFO(getLogger(), "Recovered from error");
+      }
+      reset_fault_async_success_ = 1.0;
+      in_fault_ = 0.0;
+    } catch (const franka::Exception& ex) {
+      reset_fault_async_success_ = 0.0;
+    }
+    reset_fault_cmd_ = std::numeric_limits<double>::quiet_NaN();
   }
 
   if (control_mode_ == franka_hardware::ControlMode::JointTorque) {
@@ -215,8 +246,8 @@ rclcpp::Logger FrankaHardwareInterface::getLogger() {
 }
 
 hardware_interface::return_type FrankaHardwareInterface::perform_command_mode_switch(
-    const std::vector<std::string>& start_interfaces,
-    const std::vector<std::string>& stop_interfaces) {
+    const std::vector<std::string>& /*start_interfaces*/,
+    const std::vector<std::string>& /*stop_interfaces*/) {
   RCLCPP_SCOPE_EXIT({
     start_modes_.clear();
     stop_modes_.clear();
@@ -256,6 +287,19 @@ hardware_interface::return_type FrankaHardwareInterface::perform_command_mode_sw
     robot_->initializeContinuousReading();
     control_mode_ = franka_hardware::ControlMode::None;
   }
+
+  if (stop_fault_controller_) {
+    fault_controller_running_ = false;
+  }
+  if (start_fault_controller_) {
+    fault_controller_running_ = true;
+  }
+
+  stop_fault_controller_ = false;
+  start_fault_controller_ = false;
+  start_modes_.clear();
+  stop_modes_.clear();
+
   return hardware_interface::return_type::OK;
 }
 
@@ -281,11 +325,23 @@ hardware_interface::return_type FrankaHardwareInterface::prepare_command_mode_sw
     return hardware_interface::return_type::ERROR;
   }
 
+  // reset auxiliary switching booleans
+  stop_fault_controller_ = false;
+  start_fault_controller_ = false;
+
   // all start interfaces must be the same - can't mix position and velocity control
   if (!start_modes_.empty()) {
     if (!std::equal(start_modes_.begin() + 1, start_modes_.end(), start_modes_.begin())) {
       return hardware_interface::return_type::ERROR;
     }
+    if (robot_->hasError()) {
+      RCLCPP_ERROR(
+          getLogger(),
+          "Robot is in error state. Cannot switch control mode -- Make sure to call ros2 service "
+          "call /NAMESPACE/fault_controller/reset_fault example_interfaces/srv/Trigger.");
+      return hardware_interface::return_type::ERROR;
+    }
+
     if (start_modes_[0] == hardware_interface::HW_IF_POSITION && effort_interface_claimed_) {
       RCLCPP_ERROR(getLogger(),
                    "Cannot switch to position control mode. Effort interface is claimed.");
@@ -315,6 +371,17 @@ hardware_interface::return_type FrankaHardwareInterface::prepare_command_mode_sw
       (stop_modes_.size() != kNumberOfJoints ||
        !std::equal(stop_modes_.begin() + 1, stop_modes_.end(), stop_modes_.begin()))) {
     return hardware_interface::return_type::ERROR;
+  }
+
+  for (const auto& key : stop_interfaces) {
+    if ((key == "reset_fault/command") || (key == "reset_fault/async_success")) {
+      stop_fault_controller_ = true;
+    }
+  }
+  for (const auto& key : start_interfaces) {
+    if ((key == "reset_fault/command") || (key == "reset_fault/async_success")) {
+      start_fault_controller_ = true;
+    }
   }
   return hardware_interface::return_type::OK;
 }

@@ -12,15 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <franka_hardware/robot.hpp>
-
-#include <cassert>
-#include <mutex>
-
-#include <fmt/core.h>
-#include <fmt/ostream.h>
-#include <fmt/ranges.h>
 #include <franka/control_tools.h>
+#include <franka/exception.h>
+#include <cassert>
+#include <franka_hardware/robot.hpp>
+#include <mutex>
 #include <rclcpp/logging.hpp>
 
 namespace franka_hardware {
@@ -87,18 +83,23 @@ void Robot::initializeTorqueControl() {
   assert(isStopped());
   stopped_ = false;
   const auto kTorqueControl = [this]() {
-    robot_->control(
-        [this](const franka::RobotState& state, const franka::Duration& /*period*/) {
-          {
-            std::lock_guard<std::mutex> lock(read_mutex_);
-            current_state_ = state;
-          }
-          std::lock_guard<std::mutex> lock(write_mutex_);
-          franka::Torques out(tau_command_);
-          out.motion_finished = finish_;
-          return out;
-        },
-        true, franka::kMaxCutoffFrequency);
+    try {
+      robot_->control(
+          [this](const franka::RobotState& state, const franka::Duration& /*period*/) {
+            {
+              std::lock_guard<std::mutex> lock(read_mutex_);
+              current_state_ = state;
+            }
+            std::lock_guard<std::mutex> lock(write_mutex_);
+            franka::Torques out(tau_command_);
+            out.motion_finished = finish_;
+            return out;
+          },
+          true, franka::kMaxCutoffFrequency);
+    } catch (const franka::ControlException& e) {
+      RCLCPP_ERROR_STREAM(rclcpp::get_logger("franka_robot"), e.what());
+      has_error_ = true;
+    }
   };
   control_thread_ = std::make_unique<std::thread>(kTorqueControl);
 }
@@ -107,19 +108,24 @@ void Robot::initializePositionControl() {
   assert(isStopped());
   stopped_ = false;
   const auto kPositionControl = [this]() {
-    robot_->control(
-        [this](const franka::RobotState& state, const franka::Duration& /*period*/) {
-          {
-            std::lock_guard<std::mutex> lock(read_mutex_);
-            current_state_ = state;
-          }
-          std::lock_guard<std::mutex> lock(write_mutex_);
-          franka::JointPositions out(position_command_);
-          out.motion_finished = finish_;
-          return out;
-        },
-        franka::ControllerMode::kJointImpedance, true,
-        1);  // Bigger values causes the robot to be unstable
+    try {
+      robot_->control(
+          [this](const franka::RobotState& state, const franka::Duration& /*period*/) {
+            {
+              std::lock_guard<std::mutex> lock(read_mutex_);
+              current_state_ = state;
+            }
+            std::lock_guard<std::mutex> lock(write_mutex_);
+            franka::JointPositions out(position_command_);
+            out.motion_finished = finish_;
+            return out;
+          },
+          franka::ControllerMode::kJointImpedance, true,
+          1);  // Bigger values causes the robot to be unstable
+    } catch (const franka::ControlException& e) {
+      RCLCPP_ERROR_STREAM(rclcpp::get_logger("franka_robot"), e.what());
+      has_error_ = true;
+    }
   };
   control_thread_ = std::make_unique<std::thread>(kPositionControl);
 }
@@ -128,13 +134,18 @@ void Robot::initializeContinuousReading() {
   assert(isStopped());
   stopped_ = false;
   const auto kReading = [this]() {
-    robot_->read([this](const franka::RobotState& state) {
-      {
-        std::lock_guard<std::mutex> lock(read_mutex_);
-        current_state_ = state;
-      }
-      return !finish_;
-    });
+    try {
+      robot_->read([this](const franka::RobotState& state) {
+        {
+          std::lock_guard<std::mutex> lock(read_mutex_);
+          current_state_ = state;
+        }
+        return !finish_;
+      });
+    } catch (const franka::ControlException& e) {
+      RCLCPP_ERROR_STREAM(rclcpp::get_logger("franka_robot"), e.what());
+      has_error_ = true;
+    }
   };
   control_thread_ = std::make_unique<std::thread>(kReading);
 }
@@ -145,5 +156,16 @@ Robot::~Robot() {
 
 bool Robot::isStopped() const {
   return stopped_;
+}
+
+bool Robot::connected() {
+  return robot_ != nullptr;
+}
+
+void Robot::resetError() {
+  std::lock_guard<std::mutex> lock(write_mutex_);
+  stopRobot();
+  robot_->automaticErrorRecovery();
+  has_error_ = false;
 }
 }  // namespace franka_hardware

@@ -32,7 +32,6 @@
 using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
 
 namespace franka_hardware {
-
 class FrankaHardwareInterface : public hardware_interface::SystemInterface {
  public:
   explicit FrankaHardwareInterface(std::unique_ptr<Robot> robot);
@@ -80,5 +79,13 @@ class FrankaHardwareInterface : public hardware_interface::SystemInterface {
   const std::string k_robot_name{"panda"};
   const std::string k_robot_state_interface_name{"robot_state"};
   const std::string k_robot_model_interface_name{"robot_model"};
+
+  // fault control
+  double reset_fault_cmd_;
+  double reset_fault_async_success_;
+  double in_fault_;
+  bool fault_controller_running_ = false;  // if fault controller running
+  bool stop_fault_controller_ = false;
+  bool start_fault_controller_ = false;
 };
 }  // namespace franka_hardware
