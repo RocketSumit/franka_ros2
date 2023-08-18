@@ -47,7 +47,11 @@ std::vector<StateInterface> FrankaHardwareInterface::export_state_interfaces() {
       state_interfaces.emplace_back(hardware_interface::StateInterface(
           sensor.name, sensor.state_interfaces[j].name, &hw_ft_sensor_measurements_[j]));
     }
-  }
+  }  
+  
+  // state interface which reports if robot is faulted
+  state_interfaces.emplace_back(
+    hardware_interface::StateInterface("reset_fault", "internal_fault", &in_fault_));
 
   return state_interfaces;
 }
@@ -59,6 +63,13 @@ std::vector<CommandInterface> FrankaHardwareInterface::export_command_interfaces
     command_interfaces.emplace_back(CommandInterface(
         info_.joints[i].name, hardware_interface::HW_IF_EFFORT, &hw_commands_.at(i)));
   }
+
+  command_interfaces.emplace_back(
+    hardware_interface::CommandInterface("reset_fault", "command", &reset_fault_cmd_));
+
+  command_interfaces.emplace_back(hardware_interface::CommandInterface(
+    "reset_fault", "async_success", &reset_fault_async_success_));
+
   return command_interfaces;
 }
 
@@ -82,11 +93,20 @@ CallbackReturn FrankaHardwareInterface::on_deactivate(
 
 hardware_interface::return_type FrankaHardwareInterface::read(const rclcpp::Time& /*time*/,
                                                               const rclcpp::Duration& /*period*/) {
-  const auto kState = robot_->read();
-  hw_positions_ = kState.q;
-  hw_velocities_ = kState.dq;
-  hw_efforts_ = kState.tau_J;
-  hw_ft_sensor_measurements_ = kState.K_F_ext_hat_K;
+  if (robot_->connected()){
+    try{
+    const auto kState = robot_->read();
+    hw_positions_ = kState.q;
+    hw_velocities_ = kState.dq;
+    hw_efforts_ = kState.tau_J;
+    hw_ft_sensor_measurements_ = kState.K_F_ext_hat_K;
+    }
+    catch (const franka::Exception& ex){
+      RCLCPP_ERROR(getLogger(), "Exception in read: %s", ex.what());
+      in_fault_ = 1.0;
+    }
+  }
+
   return hardware_interface::return_type::OK;
 }
 
@@ -95,6 +115,22 @@ hardware_interface::return_type FrankaHardwareInterface::write(const rclcpp::Tim
   if (std::any_of(hw_commands_.begin(), hw_commands_.end(),
                   [](double c) { return not std::isfinite(c); })) {
     return hardware_interface::return_type::ERROR;
+  }
+
+  if (!std::isnan(reset_fault_cmd_) && fault_controller_running_)
+  {
+    try
+    {
+      robot_->resetError();
+      reset_fault_async_success_ = 1.0;
+      in_fault_ = 0.0;
+      RCLCPP_INFO(getLogger(), "Recovered from error");
+    }
+    catch (const franka::Exception& ex)
+    {
+      reset_fault_async_success_ = 0.0;
+    }
+    reset_fault_cmd_ = NO_CMD;
   }
 
   robot_->write(hw_commands_);
@@ -179,12 +215,36 @@ hardware_interface::return_type FrankaHardwareInterface::perform_command_mode_sw
     robot_->initializeContinuousReading();
     effort_interface_running_ = false;
   }
+
+  if (stop_fault_controller_)
+  {
+    fault_controller_running_ = false;
+  }
+  if (start_fault_controller_)
+  {
+    fault_controller_running_ = true;
+  }
+
+  stop_fault_controller_ = false;
+  start_fault_controller_ = false;
+  start_modes_.clear();
+  stop_modes_.clear();
+
+
   return hardware_interface::return_type::OK;
 }
 
 hardware_interface::return_type FrankaHardwareInterface::prepare_command_mode_switch(
     const std::vector<std::string>& start_interfaces,
     const std::vector<std::string>& stop_interfaces) {
+
+  // reset auxiliary switching booleans
+  stop_fault_controller_ = false;
+  start_fault_controller_ = false;
+
+  start_modes_.clear();
+  stop_modes_.clear();
+
   auto is_effort_interface = [](const std::string& interface) {
     return interface.find(hardware_interface::HW_IF_EFFORT) != std::string::npos;
   };
@@ -212,9 +272,39 @@ hardware_interface::return_type FrankaHardwareInterface::prepare_command_mode_sw
     error_string += std::to_string(kNumberOfJoints);
     throw std::invalid_argument(error_string);
   }
+  for (const auto & key : stop_interfaces)
+  {
+  if ((key == "reset_fault/command") || (key == "reset_fault/async_success"))
+    {
+      stop_modes_.emplace_back(StopStartInterface::STOP_FAULT_CTRL);
+    }
+  }
+  for (const auto & key : start_interfaces)
+  {
+    if ((key == "reset_fault/command") || (key == "reset_fault/async_success"))
+    {
+      start_modes_.emplace_back(StopStartInterface::START_FAULT_CTRL);
+    }
+  }
+  if (
+    !stop_modes_.empty() &&
+    std::find(stop_modes_.begin(), stop_modes_.end(), StopStartInterface::STOP_FAULT_CTRL) !=
+      stop_modes_.end())
+  {
+    stop_fault_controller_ = true;
+  }
+  if (
+    !start_modes_.empty() &&
+    (std::find(start_modes_.begin(), start_modes_.end(), StopStartInterface::START_FAULT_CTRL) !=
+      start_modes_.end()))
+  {
+    start_fault_controller_ = true;
+  }
+
   return hardware_interface::return_type::OK;
 }
 }  // namespace franka_hardware
+
 
 #include "pluginlib/class_list_macros.hpp"
 // NOLINTNEXTLINE

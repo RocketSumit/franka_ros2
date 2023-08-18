@@ -76,6 +76,22 @@ class Robot {
   /// @return true if there is no control or reading loop running.
   bool isStopped() const;
 
+  /**
+   * Wrapper around franka::Robot::automaticErrorRecovery(). This method is thread-safe.
+   * Stops all currently running motions.
+   *
+   * If a control or motion generator loop is running in another thread, it will be preempted
+   * with a franka::ControlException.
+   *
+   * @throw CommandException if the Control reports an error.
+   * @throw NetworkException if the connection is lost, e.g. after a timeout.
+   */
+  void resetError();
+
+  /// @brief Check if the robot is connected.
+  /// @return true if the robot is connected. 
+  virtual bool connected();
+  
  private:
   std::unique_ptr<std::thread> control_thread_;
   std::unique_ptr<franka::Robot> robot_;

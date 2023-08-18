@@ -13,16 +13,14 @@
 // limitations under the License.
 
 #include <franka_hardware/robot.hpp>
-
 #include <cassert>
 #include <mutex>
-
 #include <franka/control_tools.h>
 #include <rclcpp/logging.hpp>
 
 namespace franka_hardware {
 
-Robot::Robot(const std::string& robot_ip, const rclcpp::Logger& logger) {
+Robot::Robot(const std::string& robot_ip, const rclcpp::Logger& logger){
   tau_command_.fill(0.);
   franka::RealtimeConfig rt_config = franka::RealtimeConfig::kEnforce;
   if (not franka::hasRealtimeKernel()) {
@@ -109,5 +107,14 @@ Robot::~Robot() {
 
 bool Robot::isStopped() const {
   return stopped_;
+}
+
+bool Robot::connected(){
+  return robot_ != nullptr;
+}
+
+void Robot::resetError(){
+  std::lock_guard<std::mutex> lock(write_mutex_);
+  robot_->automaticErrorRecovery();
 }
 }  // namespace franka_hardware

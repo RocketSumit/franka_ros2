@@ -31,7 +31,12 @@
 using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
 
 namespace franka_hardware {
-
+enum class StopStartInterface
+{
+  NONE,
+  STOP_FAULT_CTRL,
+  START_FAULT_CTRL,
+};
 class FrankaHardwareInterface : public hardware_interface::SystemInterface {
  public:
   hardware_interface::return_type prepare_command_mode_switch(
@@ -61,5 +66,16 @@ class FrankaHardwareInterface : public hardware_interface::SystemInterface {
   bool effort_interface_claimed_ = false;
   bool effort_interface_running_ = false;
   static rclcpp::Logger getLogger();
+  std::vector<StopStartInterface> stop_modes_;
+  std::vector<StopStartInterface> start_modes_;
+  // fault control
+  double reset_fault_cmd_;
+  double reset_fault_async_success_;
+  double in_fault_;
+  static constexpr double NO_CMD = std::numeric_limits<double>::quiet_NaN();
+  bool fault_controller_running_ = false; // if fault controller running
+  bool stop_fault_controller_ = false;
+  bool start_fault_controller_ = false;
+
 };
 }  // namespace franka_hardware
