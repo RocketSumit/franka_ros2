@@ -29,6 +29,8 @@
 #include <hardware_interface/types/hardware_interface_type_values.hpp>
 #include <rclcpp/macros.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp/scope_exit.hpp>
+#include <rcpputils/scope_exit.hpp>
 
 namespace franka_hardware {
 
@@ -72,13 +74,15 @@ std::vector<CommandInterface> FrankaHardwareInterface::export_command_interfaces
   std::vector<CommandInterface> command_interfaces;
   command_interfaces.reserve(info_.joints.size());
   for (auto i = 0U; i < info_.joints.size(); i++) {
-    const auto& command_interface_name = info_.joints[i].command_interfaces[0].name;
-    if (command_interface_name == hardware_interface::HW_IF_POSITION) {
-      command_interfaces.emplace_back(CommandInterface(info_.joints[i].name, command_interface_name,
-                                                       &position_commands_.at(i)));
-    } else if (command_interface_name == hardware_interface::HW_IF_EFFORT) {
-      command_interfaces.emplace_back(
-          CommandInterface(info_.joints[i].name, command_interface_name, &effort_commands_.at(i)));
+    for (const auto& command_interface : info_.joints[i].command_interfaces) {
+      if (command_interface.name == hardware_interface::HW_IF_POSITION) {
+        command_interfaces.emplace_back(CommandInterface(
+            info_.joints[i].name, command_interface.name, &position_commands_.at(i)));
+      }
+      if (command_interface.name == hardware_interface::HW_IF_EFFORT) {
+        command_interfaces.emplace_back(CommandInterface(
+            info_.joints[i].name, command_interface.name, &effort_commands_.at(i)));
+      }
     }
   }
   return command_interfaces;
@@ -149,18 +153,20 @@ CallbackReturn FrankaHardwareInterface::on_init(const hardware_interface::Hardwa
   }
 
   for (const auto& joint : info_.joints) {
-    if (joint.command_interfaces.size() != 1) {
-      RCLCPP_FATAL(getLogger(), "Joint '%s' has %zu command interfaces found. 1 expected.",
+    if (joint.command_interfaces.size() != 1 && joint.command_interfaces.size() != 2) {
+      RCLCPP_FATAL(getLogger(), "Joint '%s' has %zu command interfaces found. 1 or 2 expected.",
                    joint.name.c_str(), joint.command_interfaces.size());
       return CallbackReturn::ERROR;
     }
-    if (joint.command_interfaces[0].name != hardware_interface::HW_IF_EFFORT and
-        joint.command_interfaces[0].name != hardware_interface::HW_IF_POSITION) {
-      RCLCPP_FATAL(getLogger(),
-                   "Joint '%s' has unexpected command interface '%s'. Expected '%s' or '%s'",
-                   joint.name.c_str(), joint.command_interfaces[0].name.c_str(),
-                   hardware_interface::HW_IF_EFFORT, hardware_interface::HW_IF_POSITION);
-      return CallbackReturn::ERROR;
+    for (const auto& command_interface : joint.command_interfaces) {
+      if (command_interface.name != hardware_interface::HW_IF_EFFORT and
+          command_interface.name != hardware_interface::HW_IF_POSITION) {
+        RCLCPP_FATAL(getLogger(),
+                     "Joint '%s' has unexpected command interface '%s'. Expected '%s' or '%s'",
+                     joint.name.c_str(), joint.command_interfaces[0].name.c_str(),
+                     hardware_interface::HW_IF_EFFORT, hardware_interface::HW_IF_POSITION);
+        return CallbackReturn::ERROR;
+      }
     }
     if (joint.state_interfaces.size() != 3) {
       RCLCPP_FATAL(getLogger(), "Joint '%s' has %zu state interfaces found. 3 expected.",
@@ -209,13 +215,38 @@ rclcpp::Logger FrankaHardwareInterface::getLogger() {
 }
 
 hardware_interface::return_type FrankaHardwareInterface::perform_command_mode_switch(
-    const std::vector<std::string>& /*start_interfaces*/,
-    const std::vector<std::string>& /*stop_interfaces*/) {
-  if (control_mode_ == franka_hardware::ControlMode::None and effort_interface_claimed_) {
+    const std::vector<std::string>& start_interfaces,
+    const std::vector<std::string>& stop_interfaces) {
+  RCLCPP_SCOPE_EXIT({
+    start_modes_.clear();
+    stop_modes_.clear();
+  });
+
+  if (stop_modes_.size() != 0 &&
+      std::find(stop_modes_.begin(), stop_modes_.end(), hardware_interface::HW_IF_POSITION) !=
+          stop_modes_.end()) {
+    position_interface_claimed_ = false;
+  } else if (stop_modes_.size() != 0 &&
+             std::find(stop_modes_.begin(), stop_modes_.end(), hardware_interface::HW_IF_EFFORT) !=
+                 stop_modes_.end()) {
+    effort_interface_claimed_ = false;
+  }
+
+  if (start_modes_.size() != 0 &&
+      std::find(start_modes_.begin(), start_modes_.end(), hardware_interface::HW_IF_POSITION) !=
+          start_modes_.end()) {
+    position_interface_claimed_ = true;
+  } else if (start_modes_.size() != 0 &&
+             std::find(start_modes_.begin(), start_modes_.end(),
+                       hardware_interface::HW_IF_EFFORT) != start_modes_.end()) {
+    effort_interface_claimed_ = true;
+  }
+
+  if (effort_interface_claimed_) {
     robot_->stopRobot();
     robot_->initializeTorqueControl();
     control_mode_ = franka_hardware::ControlMode::JointTorque;
-  } else if (control_mode_ == franka_hardware::ControlMode::None and position_interface_claimed_) {
+  } else if (position_interface_claimed_) {
     robot_->stopRobot();
     robot_->initializePositionControl();
     control_mode_ = franka_hardware::ControlMode::JointPosition;
@@ -231,45 +262,59 @@ hardware_interface::return_type FrankaHardwareInterface::perform_command_mode_sw
 hardware_interface::return_type FrankaHardwareInterface::prepare_command_mode_switch(
     const std::vector<std::string>& start_interfaces,
     const std::vector<std::string>& stop_interfaces) {
-  auto is_effort_interface = [](const std::string& interface) {
-    return interface.find(hardware_interface::HW_IF_EFFORT) != std::string::npos;
-  };
-  auto is_position_interface = [](const std::string& interface) {
-    return interface.find(hardware_interface::HW_IF_POSITION) != std::string::npos;
-  };
-
-  int64_t num_stop_effort_interfaces =
-      std::count_if(stop_interfaces.begin(), stop_interfaces.end(), is_effort_interface);
-  int64_t num_stop_position_interfaces =
-      std::count_if(stop_interfaces.begin(), stop_interfaces.end(), is_position_interface);
-  if (num_stop_effort_interfaces == kNumberOfJoints) {
-    effort_interface_claimed_ = false;
-  } else if (num_stop_position_interfaces == kNumberOfJoints) {
-    position_interface_claimed_ = false;
-  } else if (num_stop_effort_interfaces != 0 || num_stop_position_interfaces != 0) {
-    RCLCPP_FATAL(this->getLogger(),
-                 "Expected %ld effort/position interfaces to stop, but got %ld/%ld instead.",
-                 kNumberOfJoints, num_stop_effort_interfaces, num_stop_position_interfaces);
-    std::string error_string = "Invalid number of effort interfaces to stop. Expected ";
-    error_string += std::to_string(kNumberOfJoints);
-    throw std::invalid_argument(error_string);
+  stop_modes_.clear();
+  start_modes_.clear();
+  // Starting interfaces
+  // add start interface per joint in tmp var for later check
+  for (const auto& key : start_interfaces) {
+    for (auto i = 0u; i < info_.joints.size(); i++) {
+      if (key == info_.joints[i].name + "/" + hardware_interface::HW_IF_POSITION) {
+        start_modes_.push_back(hardware_interface::HW_IF_POSITION);
+      }
+      if (key == info_.joints[i].name + "/" + hardware_interface::HW_IF_EFFORT) {
+        start_modes_.push_back(hardware_interface::HW_IF_EFFORT);
+      }
+    }
+  }
+  // set new mode to all interfaces at the same time
+  if (!start_modes_.empty() && start_modes_.size() != kNumberOfJoints) {
+    return hardware_interface::return_type::ERROR;
   }
 
-  int64_t num_start_effort_interfaces =
-      std::count_if(start_interfaces.begin(), start_interfaces.end(), is_effort_interface);
-  int64_t num_start_position_interfaces =
-      std::count_if(start_interfaces.begin(), start_interfaces.end(), is_position_interface);
-  if (num_start_effort_interfaces == kNumberOfJoints) {
-    effort_interface_claimed_ = true;
-  } else if (num_start_position_interfaces == kNumberOfJoints) {
-    position_interface_claimed_ = true;
-  } else if (num_start_effort_interfaces != 0 || num_start_position_interfaces != 0) {
-    RCLCPP_FATAL(this->getLogger(),
-                 "Expected %ld effort/position interfaces to start, but got %ld/%ld instead.",
-                 kNumberOfJoints, num_start_effort_interfaces, num_start_position_interfaces);
-    std::string error_string = "Invalid number of effort interfaces to start. Expected ";
-    error_string += std::to_string(kNumberOfJoints);
-    throw std::invalid_argument(error_string);
+  // all start interfaces must be the same - can't mix position and velocity control
+  if (!start_modes_.empty()) {
+    if (!std::equal(start_modes_.begin() + 1, start_modes_.end(), start_modes_.begin())) {
+      return hardware_interface::return_type::ERROR;
+    }
+    if (start_modes_[0] == hardware_interface::HW_IF_POSITION && effort_interface_claimed_) {
+      RCLCPP_ERROR(getLogger(),
+                   "Cannot switch to position control mode. Effort interface is claimed.");
+      return hardware_interface::return_type::ERROR;
+    }
+    if (start_modes_[0] == hardware_interface::HW_IF_EFFORT && position_interface_claimed_) {
+      RCLCPP_ERROR(getLogger(),
+                   "Cannot switch to effort control mode. Position interface is claimed.");
+      return hardware_interface::return_type::ERROR;
+    }
+  }
+
+  // Stopping interfaces
+  // add stop interface per joint in tmp var for later check
+  for (const auto& key : stop_interfaces) {
+    for (auto i = 0u; i < info_.joints.size(); i++) {
+      if (key == info_.joints[i].name + "/" + hardware_interface::HW_IF_POSITION) {
+        stop_modes_.push_back(hardware_interface::HW_IF_POSITION);
+      }
+      if (key == info_.joints[i].name + "/" + hardware_interface::HW_IF_EFFORT) {
+        stop_modes_.push_back(hardware_interface::HW_IF_EFFORT);
+      }
+    }
+  }
+  // stop all interfaces at the same time
+  if (stop_modes_.size() != 0 &&
+      (stop_modes_.size() != kNumberOfJoints ||
+       !std::equal(stop_modes_.begin() + 1, stop_modes_.end(), stop_modes_.begin()))) {
+    return hardware_interface::return_type::ERROR;
   }
   return hardware_interface::return_type::OK;
 }

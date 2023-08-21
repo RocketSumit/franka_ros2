@@ -68,6 +68,10 @@ class FrankaHardwareInterface : public hardware_interface::SystemInterface {
 
   std::array<double, 6> hw_ft_sensor_measurements_{0, 0, 0, 0, 0, 0};
   franka_hardware::ControlMode control_mode_ = franka_hardware::ControlMode::None;
+  // resources switching aux vars
+  std::vector<std::string> stop_modes_;
+  std::vector<std::string> start_modes_;
+
   bool effort_interface_claimed_ = false;
   bool position_interface_claimed_ = false;
   bool initialized_ = false;
