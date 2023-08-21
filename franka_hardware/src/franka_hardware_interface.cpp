@@ -101,7 +101,7 @@ hardware_interface::return_type FrankaHardwareInterface::read(const rclcpp::Time
   hw_positions_ = hw_franka_robot_state_.q;
   hw_velocities_ = hw_franka_robot_state_.dq;
   hw_efforts_ = hw_franka_robot_state_.tau_J;
-  hw_ft_sensor_measurements_ = kState.K_F_ext_hat_K;
+  hw_ft_sensor_measurements_ = hw_franka_robot_state_.K_F_ext_hat_K;
   return hardware_interface::return_type::OK;
 }
 

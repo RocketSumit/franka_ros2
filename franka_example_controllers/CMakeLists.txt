@@ -24,6 +24,7 @@ find_package(franka_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(franka_semantic_components)
 find_package(generate_parameter_library)
+find_package(Franka REQUIRED)
 
 add_library(
         ${PROJECT_NAME}
@@ -46,6 +47,7 @@ ament_target_dependencies(
         pluginlib
         rclcpp
         rclcpp_lifecycle
+        Franka
         franka_semantic_components
 )
 
