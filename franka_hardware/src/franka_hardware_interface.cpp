@@ -230,7 +230,7 @@ CallbackReturn FrankaHardwareInterface::on_init(const hardware_interface::Hardwa
     }
     try {
       RCLCPP_INFO(getLogger(), "Connecting to robot at \"%s\" ...", robot_ip.c_str());
-      robot_ = std::make_unique<Robot>(robot_ip, getLogger());
+      robot_ = std::make_shared<Robot>(robot_ip, getLogger());
     } catch (const franka::Exception& e) {
       RCLCPP_FATAL(getLogger(), "Could not connect to robot");
       RCLCPP_FATAL(getLogger(), "%s", e.what());
@@ -238,6 +238,10 @@ CallbackReturn FrankaHardwareInterface::on_init(const hardware_interface::Hardwa
     }
     RCLCPP_INFO(getLogger(), "Successfully connected to robot");
   }
+
+  node_ = std::make_shared<FrankaParamServiceServer>(rclcpp::NodeOptions(), robot_);
+  executor_ = std::make_shared<FrankaExecutor>();
+  executor_->add_node(node_);
   return CallbackReturn::SUCCESS;
 }
 

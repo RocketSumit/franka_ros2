@@ -28,6 +28,8 @@
 #include <rclcpp/macros.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_lifecycle/state.hpp>
+#include "franka_hardware/franka_executor.hpp"
+#include "franka_hardware/franka_param_service_server.hpp"
 
 using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
 
@@ -55,7 +57,9 @@ class FrankaHardwareInterface : public hardware_interface::SystemInterface {
   static const size_t kNumberOfJoints = 7;
 
  private:
-  std::unique_ptr<Robot> robot_;
+  std::shared_ptr<Robot> robot_;
+  std::shared_ptr<FrankaParamServiceServer> node_;
+  std::shared_ptr<FrankaExecutor> executor_;
   std::array<double, kNumberOfJoints> effort_commands_{0, 0, 0, 0, 0, 0, 0};
   std::array<double, kNumberOfJoints> position_commands_{0, 0, 0, 0, 0, 0, 0};
   std::array<double, kNumberOfJoints> hw_positions_{0, 0, 0, 0, 0, 0, 0};

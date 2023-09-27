@@ -19,12 +19,14 @@ find_package(franka_msgs REQUIRED)
 find_package(hardware_interface REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(Franka REQUIRED)
-
+find_package(rclcpp_components REQUIRED)
 
 add_library(franka_hardware
         SHARED
         src/franka_hardware_interface.cpp
-        src/robot.cpp)
+        src/robot.cpp
+        src/franka_param_service_server.cpp
+        src/franka_executor.cpp)
 target_include_directories(
         franka_hardware
         PRIVATE
